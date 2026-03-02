@@ -1,3 +1,4 @@
+
 import streamlit as st
 import yfinance as yf
 import pandas as pd
@@ -11,6 +12,7 @@ load_dotenv()
 GEMINI_KEY = os.getenv("GEMINI_API_KEY")
 client = genai.Client(api_key=GEMINI_KEY)
 CURRENT_MODEL = "gemini-3-flash-preview"
+SAVE_FILE = "my_portfolio.csv"
 
 # 2. PAGE SETTINGS
 st.set_page_config(page_title="Dividend Income Tracker", layout="wide")
@@ -21,7 +23,7 @@ st.caption("⚠️ **IMPORTANT DISCLOSURE:** This platform is an AI-driven educa
 st.title("💰 Dividend Income Tracker and AI Insights")
 st.markdown("---")
 
-# 3. SIDEBAR: CUSTOM BILL GOALS
+# 3. SIDEBAR: CUSTOM BILL GOALS & SAVE/LOAD
 with st.sidebar:
     st.header("⚙️ Your Monthly Bill Goals")
     u_cost = st.number_input("Level 1: Utilities", value=150)
@@ -38,17 +40,38 @@ with st.sidebar:
         "Financial Freedom": f_cost
     }
 
+    st.markdown("---")
+    st.header("💾 Portfolio Storage")
+    
+    col_s1, col_s2 = st.columns(2)
+    
+    # Save Button
+    if col_s1.button("💾 Save"):
+        if 'portfolio_df' in st.session_state:
+            st.session_state.portfolio_df.to_csv(SAVE_FILE, index=False)
+            st.success("Saved!")
+
+    # Load Button
+    if col_s2.button("📂 Load"):
+        if os.path.exists(SAVE_FILE):
+            st.session_state.portfolio_df = pd.read_csv(SAVE_FILE)
+            st.rerun()
+        else:
+            st.error("No file found.")
+
 # 4. MAIN PORTFOLIO INPUT
 st.header("📋 Your Portfolio Holdings")
-st.write("Add your tickers (e.g., AAPL, JNJ) and share counts. Click the '+' below the table to add rows.")
+st.write("Add your tickers and share counts. Click the '+' below the table to add rows.")
 
-# STARTING WITH AN EMPTY TABLE
+# Initialize the table in session state if it doesn't exist
 if 'portfolio_df' not in st.session_state:
-    st.session_state.portfolio_df = pd.DataFrame(
-        [{"Ticker": "", "Shares": 0.0}],
-    )
+    st.session_state.portfolio_df = pd.DataFrame([{"Ticker": "", "Shares": 0.0}])
 
-edited_df = st.data_editor(st.session_state.portfolio_df, num_rows="dynamic", use_container_width=True)
+# The data editor updates the session state directly
+edited_df = st.data_editor(st.session_state.portfolio_df, num_rows="dynamic", use_container_width=True, key="portfolio_editor")
+
+# Update the stored dataframe whenever the editor changes
+st.session_state.portfolio_df = edited_df
 
 analyze_btn = st.button("🚀 Analyze Entire Portfolio", type="primary")
 
@@ -64,7 +87,6 @@ if analyze_btn:
                 ticker_sym = str(row["Ticker"]).strip().upper()
                 num_shares = row["Shares"]
                 
-                # Only process if Ticker is not empty and shares > 0
                 if ticker_sym and ticker_sym != "" and num_shares > 0:
                     stock = yf.Ticker(ticker_sym)
                     info = stock.info
@@ -76,13 +98,11 @@ if analyze_btn:
                     raw_yield = info.get('dividendYield', 0)
                     if raw_yield is None: raw_yield = 0
                     
-                    # Normalizer: Fixes cases like AAPL (0.39) vs DIVO (0.049)
                     if raw_yield > 0.2: 
                         refined_yield = raw_yield / 100
                     else:
                         refined_yield = raw_yield
                     
-                    # Calculate Income
                     annual_div_total = refined_yield * price * num_shares
                     monthly_div = annual_div_total / 12
                     
@@ -100,24 +120,21 @@ if analyze_btn:
         if not portfolio_results:
             st.warning("Please enter at least one valid ticker and share amount.")
         else:
-            # C. DISPLAY TOTALS FIRST (To clear space for the chart)
+            # C. DISPLAY TOTALS
             st.markdown("---")
             st.metric("Total Combined Monthly Income", f"${total_monthly_income:.2f}")
 
             # D. DISPLAY PORTFOLIO SUMMARY & CHART
-            sum_col1, sum_col2 = st.columns([1.5, 1.2]) # Adjusted ratio for better chart fit
+            sum_col1, sum_col2 = st.columns([1.5, 1.2]) 
             
             with sum_col1:
                 st.subheader("📊 Portfolio Table")
-                # Creating a clean display DF
                 display_df = pd.DataFrame(portfolio_results)
-                # Formatting the Monthly Income column for display only
                 display_df["Monthly Income"] = display_df["Monthly Income"].map("${:,.2f}".format)
                 st.dataframe(display_df, use_container_width=True, hide_index=True)
 
             with sum_col2:
                 if sector_data:
-                    # Create the Donut Chart
                     fig = px.pie(
                         values=list(sector_data.values()), 
                         names=list(sector_data.keys()), 
@@ -125,12 +142,11 @@ if analyze_btn:
                         hole=0.4,
                         color_discrete_sequence=px.colors.qualitative.Bold
                     )
-                    # Force percentages to be outside if the slices are too small
                     fig.update_traces(textposition='outside', textinfo='percent+label')
                     fig.update_layout(
                         showlegend=False, 
                         margin=dict(t=50, b=50, l=10, r=10),
-                        height=450 # Fixed height to prevent squishing
+                        height=450 
                     )
                     st.plotly_chart(fig, use_container_width=True)
 
@@ -188,5 +204,5 @@ if analyze_btn:
         st.error(f"Error: {e}")
 
 else:
-    st.info("👈 Enter your holdings in the table above and click 'Analyze' to see your combined results.")
+    st.info("👈 Enter your holdings or click 'Load' in the sidebar to begin.")
     
